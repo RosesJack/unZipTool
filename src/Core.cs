@@ -79,8 +79,8 @@ namespace PrecisionExtract {
    p.Start();p.StandardInput.Close();return p;
   }
   static void Kill(Process p) { try { if(!p.HasExited)p.Kill(); } catch(InvalidOperationException) {} }
-  List<Entry> List(string archive) {
-   using(var p=Start("l","-slt","-ba","-sccUTF-8","-p__NO_PASSWORD__","--",archive))
+  List<Entry> List(string archive, bool required = true) {
+   using(var p=Start("l","-t*","-slt","-ba","-sccUTF-8","-p__NO_PASSWORD__","--",archive))
    using(token.Register(()=>Kill(p))) {
     var stderr=p.StandardError.ReadToEndAsync(); var list=new List<Entry>(); Entry entry=null; string line;
     try {
@@ -92,7 +92,7 @@ namespace PrecisionExtract {
      else if(entry!=null && line.StartsWith("Attributes = ") && line.Substring(13).TrimStart().StartsWith("D")) entry.Folder=true;
      else if(entry!=null && ((line.StartsWith("Symbolic Link = ")&&!string.IsNullOrWhiteSpace(line.Substring(16)))||(line.StartsWith("Hard Link = ")&&!string.IsNullOrWhiteSpace(line.Substring(12))))) throw new IOException("不支持压缩包中的链接条目。");
     }
-    p.WaitForExit();token.ThrowIfCancellationRequested();if(p.ExitCode!=0)throw new IOException("无法读取压缩包（损坏、加密或格式不受支持）。"+stderr.GetAwaiter().GetResult());
+    p.WaitForExit();token.ThrowIfCancellationRequested();if(p.ExitCode!=0) {if(!required && p.ExitCode==2)return null;throw new IOException("无法读取压缩包（损坏、加密或格式不受支持）。"+stderr.GetAwaiter().GetResult());}
     return list;
     } finally { Kill(p); }
    }
@@ -138,18 +138,20 @@ namespace PrecisionExtract {
    while(File.Exists(path))path=Path.Combine(result.Output,Path.GetFileNameWithoutExtension(safe)+" ("+(i++)+")"+Path.GetExtension(safe));
    return path;
   }
-  void Walk(string archive,int depth,string source) {
+  void Walk(string archive,int depth,string source,List<Entry> contents = null) {
    token.ThrowIfCancellationRequested();if(depth>128)throw new IOException("嵌套超过 128 层，已停止。");
    report("正在扫描第 "+(depth+1)+" 层："+source);result.Archives++;
-   foreach(var entry in List(archive)) {
+   foreach(var entry in contents ?? List(archive)) {
     token.ThrowIfCancellationRequested();if(entry.Folder)continue;
-    string name=BaseName(entry.Name);bool nested=IsArchive(name),match=Match(name);
-    if(!nested && !match)continue;
+    string name=BaseName(entry.Name);bool match=Match(name);
     string staged=Path.Combine(temp,Guid.NewGuid().ToString("N")+Path.GetExtension(name));
     try {
      report("正在提取："+name);ExtractEntry(archive,entry,staged);
-     if(match) {string output=OutputFile(name);try{File.Copy(staged,output,false);result.Files.Add(output);}catch{if(File.Exists(output))File.Delete(output);throw;}}
-     if(nested) {try {Walk(staged,depth+1,source+" → "+name);} catch(OperationCanceledException) {throw;} catch(Exception e) {result.Warnings.Add(source+" → "+name+"："+e.Message);} }
+     try {
+      var nested=List(staged,IsArchive(name));
+      if(nested!=null) Walk(staged,depth+1,source+" → "+name,nested);
+      else if(match) {string output=OutputFile(name);try{File.Copy(staged,output,false);result.Files.Add(output);}catch{if(File.Exists(output))File.Delete(output);throw;}}
+     } catch(OperationCanceledException) {throw;} catch(Exception e) {result.Warnings.Add(source+" → "+name+"："+e.Message);}
     } finally { if(File.Exists(staged))File.Delete(staged); }
    }
   }

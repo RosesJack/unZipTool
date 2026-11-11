@@ -37,6 +37,22 @@ Assert (($files | Get-Content -Raw) -contains 'nested-content') 'Nested content 
 Assert (($files | Get-Content -Raw) -contains 'outer-content') 'Outer content mismatch'
 Write-Host 'PASS nested ZIP/GZIP/TAR, selective extraction, duplicate names and content'
 
+# Archives with misleading names must never become final results.
+New-Item -ItemType Directory -Force "$work\hidden", "$work\leaf" | Out-Null
+[IO.File]::WriteAllText("$work\leaf\deep.log", 'deep-leaf-content')
+[IO.File]::WriteAllText("$work\leaf\empty.log", '')
+Pack 'zip' "$work\hidden\payload" "$work\leaf\*"
+Pack '7z' "$work\disguised.log" "$work\hidden\*"
+Pack 'zip' "$work\hidden-parent.zip" "$work\disguised.log"
+$code = Run "$work\hidden-parent.zip" "$work\hidden-out" "$work\hidden.xml" '.*'
+Assert ($code -eq 0) "Content recursion failed: $code"
+$r = ReadResult "$work\hidden.xml"
+Assert ([int]$r.ExtractResult.Archives -eq 3) 'Expected ZIP -> disguised 7Z -> extensionless ZIP'
+Assert (@(Get-ChildItem -LiteralPath $r.ExtractResult.Output -File).Count -eq 2) 'Archive container leaked into results'
+Assert ([IO.File]::ReadAllText((Join-Path $r.ExtractResult.Output 'deep.log')) -eq 'deep-leaf-content') 'Deep content mismatch'
+Assert ((Get-Item (Join-Path $r.ExtractResult.Output 'empty.log')).Length -eq 0) 'Empty leaf lost'
+Write-Host 'PASS content detection, renamed archives, extensionless archives and leaf-only results'
+
 # Separate OS processes contend for the same output directory.
 $jobs = @()
 for ($i=0; $i -lt 8; $i++) {

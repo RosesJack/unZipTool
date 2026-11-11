@@ -25,3 +25,5 @@
 尚未通过 Explorer 实际菜单点击验证注册项，也未启动 Notepad++ 打开结果；这些属于首次使用时的人工验收项。Windows 10/11 的其他版本及不同 DPI 尚未逐一覆盖。
 
 1.1.2：Notepad++ 启动统一增加官方参数 `-multiInst -nosession`，强制新实例且不恢复历史会话。测试覆盖正常任务一次启动同时传入多个文件、含空格和中文路径的引用，以及超长参数分批后每批仍使用新实例。完整测试集通过。参数依据：https://github.com/notepad-plus-plus/npp-usermanual/blob/master/content/docs/command-prompt.md 。
+
+2026-11-11：改为逐文件内容探测并递归展开，仅保留命中规则的非压缩文件。新增 ZIP → 伪装为 .log 的 7Z → 无后缀 ZIP 回归，断言容器不进入结果、深层内容一致、空文件保留。构建及完整 integration.ps1 测试集通过。
